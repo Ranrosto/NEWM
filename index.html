@@ -12137,6 +12137,11 @@ function saveApiKey() {
     state.settings.claudeApiKey = key;
     saveState();
     updateApiKeyStatus();
+    // Save to IndexedDB - this is the resilient backup that survives
+    // localStorage eviction in Opera/Chrome Android.
+    idbSetApiKey(key).then((ok) => {
+        console.log('[IDB] API key saved to IndexedDB:', ok);
+    });
     // Re-request persistent storage when user actively saves a key
     // (browsers are more likely to grant it after meaningful user interaction)
     if (key) requestPersistentStorage();
@@ -12711,6 +12716,93 @@ async function requestPersistentStorage() {
         console.warn('[Storage] Persistent storage request failed:', e);
     }
 }
+
+/* ============================================================
+   ===== IndexedDB - resilient API key storage =================
+   IndexedDB survives where localStorage gets evicted by browsers
+   like Opera Android. The key is the source of truth here.
+   ============================================================ */
+const IDB_NAME = 'ran_tracker_secure';
+const IDB_STORE = 'kv';
+const IDB_KEY = 'claudeApiKey';
+
+function idbOpen() {
+    return new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) return reject(new Error('IndexedDB not supported'));
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) {
+                db.createObjectStore(IDB_STORE);
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbSetApiKey(key) {
+    try {
+        const db = await idbOpen();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).put(key, IDB_KEY);
+            tx.oncomplete = () => { db.close(); resolve(true); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+        });
+    } catch (e) {
+        console.warn('[IDB] Set failed:', e);
+        return false;
+    }
+}
+
+async function idbGetApiKey() {
+    try {
+        const db = await idbOpen();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+            req.onsuccess = () => { db.close(); resolve(req.result || ''); };
+            req.onerror = () => { db.close(); reject(req.error); };
+        });
+    } catch (e) {
+        console.warn('[IDB] Get failed:', e);
+        return '';
+    }
+}
+
+// Hydrate API key from IndexedDB on app startup. Runs after loadState().
+// If IDB has a key but state doesn't, we restore it. If state has a key
+// but IDB doesn't (legacy users), we migrate it into IDB.
+async function hydrateApiKeyFromIDB() {
+    try {
+        const idbKey = await idbGetApiKey();
+        const stateKey = (state.settings && state.settings.claudeApiKey) || '';
+        
+        if (idbKey && !stateKey) {
+            // IDB has key, state doesn't - restore it
+            console.log('[IDB] Restoring API key from IndexedDB');
+            state.settings.claudeApiKey = idbKey;
+            saveState();
+            updateApiKeyStatus();
+        } else if (stateKey && !idbKey) {
+            // state has key, IDB doesn't - migrate to IDB
+            console.log('[IDB] Migrating API key to IndexedDB');
+            await idbSetApiKey(stateKey);
+        } else if (idbKey && stateKey && idbKey !== stateKey) {
+            // Conflict - prefer IDB (it survived longer)
+            console.log('[IDB] Conflict - using IndexedDB version');
+            state.settings.claudeApiKey = idbKey;
+            saveState();
+            updateApiKeyStatus();
+        }
+    } catch (e) {
+        console.warn('[IDB] Hydration failed:', e);
+    }
+}
+
+// Run hydration on startup
+hydrateApiKeyFromIDB();
 
 /* ============================================================
    ===== PRD ADDITIONS - Upgrade #5: PWA ======================
