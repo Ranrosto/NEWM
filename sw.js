@@ -3,7 +3,7 @@
  * Bumping CACHE_NAME version invalidates old caches on next load.
  */
 
-const CACHE_NAME = 'hamaakav-sheli-v1';
+const CACHE_NAME = 'hamaakav-sheli-v3';
 const APP_SHELL = [
   './',
   './index.html',

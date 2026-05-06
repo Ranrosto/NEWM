@@ -7873,8 +7873,24 @@
             <button class="meal-window-pill" data-window="afternoon" onclick="selectMealWindow('afternoon')">אחה״צ</button>
             <button class="meal-window-pill" data-window="evening" onclick="selectMealWindow('evening')">ערב</button>
             <button class="meal-window-pill" data-window="night" onclick="selectMealWindow('night')">לילה</button>
+            <button class="meal-window-pill" data-window="custom" onclick="selectMealWindow('custom')">מועד מותאם</button>
         </div>
         <div class="meal-window-hint" id="mealWindowHint"></div>
+        
+        <!-- Custom date+time picker (shown only when 'custom' is selected) -->
+        <div class="meal-custom-datetime" id="mealCustomDateTime" style="display:none; margin-top:10px; padding:12px; background:rgba(107,156,94,0.08); border-radius:10px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:130px;">
+                    <span style="font-size:12px; color:#666;">תאריך</span>
+                    <input type="date" id="mealCustomDate" onchange="updateCustomDateTimeHint()" style="padding:8px; border:1px solid #d0c8b8; border-radius:8px; font-size:14px; font-family:inherit; background:#fff;">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:110px;">
+                    <span style="font-size:12px; color:#666;">שעה</span>
+                    <input type="time" id="mealCustomTime" onchange="updateCustomDateTimeHint()" style="padding:8px; border:1px solid #d0c8b8; border-radius:8px; font-size:14px; font-family:inherit; background:#fff;">
+                </label>
+            </div>
+            <div id="mealCustomDateTimeHint" style="font-size:12px; color:#888; margin-top:6px;"></div>
+        </div>
 
         <div class="meal-logger-btns">
             <button class="meal-analyze-btn" id="mealAnalyzeBtn" onclick="analyzeMeal()">
@@ -8807,6 +8823,8 @@ function renderLuxuryIcon(name, size = 40) {
 // ==================== STATE ====================
 let state = loadState();
 saveState(); // Persist any migration applied by loadState (e.g., new goal/settings fields)
+// Note: API key hydration from IndexedDB happens later in the script.
+// If IDB has the key but localStorage lost it, hydrateApiKeyFromIDB() will restore it.
 let viewingDayNum = null;
 let weighingWeekNum = null;
 let selectedCommitment = null;
@@ -11546,15 +11564,66 @@ function selectMealWindow(windowId) {
     document.querySelectorAll('.meal-window-pill').forEach(pill => {
         pill.classList.toggle('selected', pill.dataset.window === windowId);
     });
+    // Show/hide custom datetime picker
+    const customBox = document.getElementById('mealCustomDateTime');
+    if (customBox) {
+        customBox.style.display = (windowId === 'custom') ? 'block' : 'none';
+    }
+    // Set default values for custom (today + current time) when first opened
+    if (windowId === 'custom') {
+        const dateInput = document.getElementById('mealCustomDate');
+        const timeInput = document.getElementById('mealCustomTime');
+        if (dateInput && !dateInput.value) {
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            dateInput.value = `${yyyy}-${mm}-${dd}`;
+            // Limit to last 7 days max
+            const minDate = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+            dateInput.min = `${minDate.getFullYear()}-${String(minDate.getMonth() + 1).padStart(2, '0')}-${String(minDate.getDate()).padStart(2, '0')}`;
+            dateInput.max = `${yyyy}-${mm}-${dd}`;
+        }
+        if (timeInput && !timeInput.value) {
+            const now = new Date();
+            timeInput.value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        }
+        updateCustomDateTimeHint();
+    }
     // Hint text
     const hint = document.getElementById('mealWindowHint');
     if (windowId === 'now') {
+        hint.textContent = '';
+    } else if (windowId === 'custom') {
         hint.textContent = '';
     } else {
         const labels = { morning: 'בוקר', noon: 'צהריים', afternoon: 'אחה״צ', evening: 'ערב', night: 'לילה' };
         const time = WINDOW_REPRESENTATIVE_TIME[windowId];
         hint.textContent = `נרשם רטרואקטיבית ל${labels[windowId]} (${time})`;
     }
+}
+
+function updateCustomDateTimeHint() {
+    const dateInput = document.getElementById('mealCustomDate');
+    const timeInput = document.getElementById('mealCustomTime');
+    const hint = document.getElementById('mealCustomDateTimeHint');
+    if (!dateInput || !timeInput || !hint) return;
+    if (!dateInput.value || !timeInput.value) {
+        hint.textContent = '';
+        return;
+    }
+    // Parse to readable Hebrew label
+    const [yyyy, mm, dd] = dateInput.value.split('-').map(Number);
+    const dateObj = new Date(yyyy, mm - 1, dd);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((today.getTime() - dateObj.getTime()) / (24 * 60 * 60 * 1000));
+    let dayLabel;
+    if (diffDays === 0) dayLabel = 'היום';
+    else if (diffDays === 1) dayLabel = 'אתמול';
+    else if (diffDays === 2) dayLabel = 'שלשום';
+    else dayLabel = `לפני ${diffDays} ימים`;
+    hint.textContent = `${dayLabel} בשעה ${timeInput.value}`;
 }
 
 function resetMealWindowSelector() {
@@ -11564,6 +11633,12 @@ function resetMealWindowSelector() {
     });
     const hint = document.getElementById('mealWindowHint');
     if (hint) hint.textContent = '';
+    const customBox = document.getElementById('mealCustomDateTime');
+    if (customBox) customBox.style.display = 'none';
+    const dateInput = document.getElementById('mealCustomDate');
+    const timeInput = document.getElementById('mealCustomTime');
+    if (dateInput) dateInput.value = '';
+    if (timeInput) timeInput.value = '';
 }
 
 // ----- Speech to Text (Web Speech API) -----
@@ -11677,13 +11752,36 @@ Given a meal description in Hebrew or English, return ONLY valid JSON with these
 - flags (array of strings from: adequate_protein, high_carb, high_fat, processed, balanced, light, heavy)
 - comment_he (string in Hebrew, max 80 chars, professional and factual tone, no preaching)
 - detected_window (string, one of: "morning", "noon", "afternoon", "evening", "night", or null if no temporal cue is present in the text)
+- detected_day_offset (integer between -6 and 0, or null if no day reference is present. 0=today, -1=yesterday, -2=day before yesterday, etc.)
 For detected_window: only set it if the user EXPLICITLY mentions a meal time in the text (e.g., "ארוחת בוקר", "lunch", "אכלתי לארוחת ערב", "הבוקר", "אתמול בערב"). If the text only describes food without time context, return null.
+For detected_day_offset: detect Hebrew/English day references in the text:
+  - "היום", "הבוקר", "עכשיו", "today", "this morning" -> 0
+  - "אתמול", "אמש", "yesterday", "last night" -> -1
+  - "שלשום", "day before yesterday" -> -2
+  - "לפני 3 ימים", "3 days ago" -> -3
+  - and so on, up to -6
+  - If no day reference, return null (treat as today by default).
 Do NOT include markdown, explanations, or any text outside the JSON object.`;
 
 async function callClaudeForMeal(description) {
-    const apiKey = state.settings.claudeApiKey;
+    // Try IndexedDB first (source of truth), fall back to state
+    let apiKey = '';
+    try {
+        apiKey = await idbGetApiKey();
+    } catch (e) {
+        console.warn('[IDB] Get failed during API call:', e);
+    }
+    if (!apiKey) {
+        apiKey = (state.settings && state.settings.claudeApiKey) || '';
+    }
     if (!apiKey) {
         throw new Error('NO_API_KEY');
+    }
+    
+    // Sync state if IDB had the key but state didn't
+    if (apiKey && (!state.settings.claudeApiKey || state.settings.claudeApiKey !== apiKey)) {
+        state.settings.claudeApiKey = apiKey;
+        saveState();
     }
     
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -11776,6 +11874,14 @@ function sanitizeMealAnalysis(raw) {
         if (validWindows.includes(dw)) detectedWindow = dw;
     }
     
+    // detected_day_offset: integer between -6 and 0, or null
+    let detectedDayOffset = null;
+    if (typeof raw.detected_day_offset === 'number' && Number.isInteger(raw.detected_day_offset)) {
+        if (raw.detected_day_offset >= -6 && raw.detected_day_offset <= 0) {
+            detectedDayOffset = raw.detected_day_offset;
+        }
+    }
+    
     return {
         calories_estimate: calories,
         calories_range: range,
@@ -11785,7 +11891,8 @@ function sanitizeMealAnalysis(raw) {
         confidence,
         flags,
         comment_he: comment,
-        detected_window: detectedWindow
+        detected_window: detectedWindow,
+        detected_day_offset: detectedDayOffset
     };
 }
 
@@ -11861,11 +11968,21 @@ function showMealPreview(analysis) {
     
     // Show comment + window detection info - using textContent (no HTML)
     let commentText = analysis.comment_he || '';
-    if (selectedMealWindow === 'now' && analysis.detected_window) {
+    if (selectedMealWindow === 'now' || selectedMealWindow === 'custom') {
         const labels = { morning: 'בוקר', noon: 'צהריים', afternoon: 'אחה״צ', evening: 'ערב', night: 'לילה' };
-        const detLabel = labels[analysis.detected_window];
-        if (detLabel) {
-            commentText += (commentText ? ' · ' : '') + `Claude זיהה: ${detLabel}`;
+        const dayOff = analysis.detected_day_offset;
+        const dwLabel = analysis.detected_window ? labels[analysis.detected_window] : null;
+        // Only show AI detection if user is on 'now' (custom takes priority)
+        if (selectedMealWindow === 'now' && (dayOff !== null && dayOff !== undefined && dayOff < 0 || dwLabel)) {
+            let detectionStr = 'Claude זיהה: ';
+            if (dayOff === -1) detectionStr += 'אתמול';
+            else if (dayOff === -2) detectionStr += 'שלשום';
+            else if (typeof dayOff === 'number' && dayOff < -2) detectionStr += `לפני ${-dayOff} ימים`;
+            if (dwLabel) {
+                if (dayOff !== null && dayOff !== undefined && dayOff < 0) detectionStr += ' ';
+                detectionStr += dwLabel;
+            }
+            commentText += (commentText ? ' · ' : '') + detectionStr;
         }
     }
     document.getElementById('mealComment').textContent = commentText;
@@ -11875,38 +11992,81 @@ function showMealPreview(analysis) {
 function confirmMeal() {
     if (!pendingMealAnalysis) return;
     haptic();
-    const today = getCurrentDayNum();
-    ensureDayData(today);
+    const todayNum = getCurrentDayNum();
     
-    // Determine the time for this meal:
-    // 1. If user picked a window (not 'now'), use representative time for that window
-    // 2. Else if Claude detected a window from text AND current real time is OUTSIDE that window, use the window's representative time
-    //    (so retroactive references actually shift the time; live writing doesn't lose precision)
-    // 3. Else use the actual current time
+    // ===== Determine target day and time =====
+    // Priority order:
+    // 1. User picked 'custom' -> use the date/time inputs
+    // 2. User picked a window (morning/noon/etc) -> today + representative time
+    // 3. AI detected a day_offset and/or window from text -> apply to today
+    // 4. Default -> today + current real time
+    
+    let targetDayNum = todayNum;
     let timeStr;
-    let windowSource = 'live'; // 'live' / 'user_selected' / 'detected'
+    let windowSource = 'live'; // 'live' / 'user_selected' / 'detected' / 'custom'
     
     const now = new Date();
     const liveTimeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     
-    if (selectedMealWindow && selectedMealWindow !== 'now') {
+    if (selectedMealWindow === 'custom') {
+        // User explicitly picked date+time
+        const dateInput = document.getElementById('mealCustomDate');
+        const timeInput = document.getElementById('mealCustomTime');
+        if (dateInput && timeInput && dateInput.value && timeInput.value) {
+            const [yyyy, mm, dd] = dateInput.value.split('-').map(Number);
+            const pickedDate = new Date(yyyy, mm - 1, dd);
+            pickedDate.setHours(0, 0, 0, 0);
+            const todayMidnight = new Date();
+            todayMidnight.setHours(0, 0, 0, 0);
+            const diffDays = Math.round((todayMidnight.getTime() - pickedDate.getTime()) / (24 * 60 * 60 * 1000));
+            // diffDays = how many days back; clamp to 0..6
+            const safeDiff = Math.max(0, Math.min(6, diffDays));
+            targetDayNum = todayNum - safeDiff;
+            if (targetDayNum < 1) targetDayNum = 1; // can't go before challenge start
+            timeStr = timeInput.value;
+            windowSource = 'custom';
+        } else {
+            // Fallback if user didn't fill - use today + now
+            timeStr = liveTimeStr;
+        }
+    } else if (selectedMealWindow && selectedMealWindow !== 'now') {
+        // User picked a named window - applies to today
         timeStr = WINDOW_REPRESENTATIVE_TIME[selectedMealWindow];
         windowSource = 'user_selected';
-    } else if (pendingMealAnalysis.detected_window && WINDOW_REPRESENTATIVE_TIME[pendingMealAnalysis.detected_window]) {
-        // Check if current time is already in the detected window - if so, prefer live time
-        const liveWindow = getWindowForTime(liveTimeStr);
-        if (liveWindow && liveWindow.id === pendingMealAnalysis.detected_window) {
-            timeStr = liveTimeStr;
-            windowSource = 'live';
-        } else {
-            timeStr = WINDOW_REPRESENTATIVE_TIME[pendingMealAnalysis.detected_window];
-            windowSource = 'detected';
-        }
     } else {
-        timeStr = liveTimeStr;
+        // 'now' or default - check what AI detected
+        const detectedDayOffset = pendingMealAnalysis.detected_day_offset;
+        const detectedWindow = pendingMealAnalysis.detected_window;
+        
+        // Apply day offset if AI detected one (e.g. "אתמול" -> -1)
+        if (typeof detectedDayOffset === 'number' && detectedDayOffset < 0) {
+            const safeDiff = Math.max(0, Math.min(6, -detectedDayOffset));
+            targetDayNum = todayNum - safeDiff;
+            if (targetDayNum < 1) targetDayNum = 1;
+            // For past days, use the detected window's time, or noon as default
+            timeStr = (detectedWindow && WINDOW_REPRESENTATIVE_TIME[detectedWindow]) 
+                ? WINDOW_REPRESENTATIVE_TIME[detectedWindow] 
+                : '13:00';
+            windowSource = 'detected';
+        } else if (detectedWindow && WINDOW_REPRESENTATIVE_TIME[detectedWindow]) {
+            // No day offset, but detected a window - same logic as before
+            const liveWindow = getWindowForTime(liveTimeStr);
+            if (liveWindow && liveWindow.id === detectedWindow) {
+                timeStr = liveTimeStr;
+                windowSource = 'live';
+            } else {
+                timeStr = WINDOW_REPRESENTATIVE_TIME[detectedWindow];
+                windowSource = 'detected';
+            }
+        } else {
+            timeStr = liveTimeStr;
+        }
     }
     
-    state.days[today].meals.push({
+    // Ensure target day exists
+    ensureDayData(targetDayNum);
+    
+    state.days[targetDayNum].meals.push({
         time: timeStr,
         text: pendingMealAnalysis.text,
         calories: pendingMealAnalysis.calories_estimate || 0,
@@ -11921,6 +12081,13 @@ function confirmMeal() {
         loggedAt: Date.now()
     });
     saveState();
+    
+    // Show confirmation toast if logged to a different day
+    if (targetDayNum !== todayNum && typeof showToast === 'function') {
+        const daysBack = todayNum - targetDayNum;
+        const dayLabel = daysBack === 1 ? 'אתמול' : daysBack === 2 ? 'שלשום' : `לפני ${daysBack} ימים`;
+        showToast(`הארוחה נרשמה ל${dayLabel} בשעה ${timeStr}`);
+    }
     
     pendingMealAnalysis = null;
     cancelMealPreview();
@@ -12130,21 +12297,40 @@ function renderMealsScreen() {
 
 // ==================== SETTINGS (in More screen) ====================
 
-function saveApiKey() {
+async function saveApiKey() {
     haptic();
     const input = document.getElementById('apiKeyInput');
     const key = input.value.trim();
+    
+    // Update in-memory state immediately for UI responsiveness
+    if (!state.settings) state.settings = {};
     state.settings.claudeApiKey = key;
-    saveState();
     updateApiKeyStatus();
-    // Save to IndexedDB - this is the resilient backup that survives
-    // localStorage eviction in Opera/Chrome Android.
-    idbSetApiKey(key).then((ok) => {
-        console.log('[IDB] API key saved to IndexedDB:', ok);
-    });
+    
+    // Save to IndexedDB FIRST - this is the source of truth.
+    // IDB survives where localStorage can be evicted.
+    let idbOk = false;
+    try {
+        idbOk = await idbSetApiKey(key);
+        console.log('[IDB] API key saved to IndexedDB:', idbOk);
+    } catch (e) {
+        console.error('[IDB] Save failed:', e);
+    }
+    
+    // Also save to localStorage as a fast cache (best-effort)
+    saveState();
+    
     // Re-request persistent storage when user actively saves a key
-    // (browsers are more likely to grant it after meaningful user interaction)
     if (key) requestPersistentStorage();
+    
+    // If IDB save failed, warn the user
+    if (key && !idbOk) {
+        const status = document.getElementById('apiKeyStatus');
+        if (status) {
+            status.textContent = '⚠️ נשמר זמנית - ייתכן שהמפתח לא יישמר לטווח ארוך';
+            status.className = 'api-key-status';
+        }
+    }
 }
 
 function updateApiKeyStatus() {
@@ -12175,12 +12361,22 @@ function updateSettingsToggles() {
     if (c) c.classList.toggle('on', !!state.settings.showCausalMirror);
 }
 
-// Hook into More screen render
+// Hook into More screen render - also re-hydrate API key from IDB
+// to ensure it's always shown if it exists
 const _originalRenderMore = renderMoreScreen;
 renderMoreScreen = function() {
     _originalRenderMore();
     updateApiKeyStatus();
     updateSettingsToggles();
+    // Re-check IDB - if key exists there but not in state, restore it
+    idbGetApiKey().then((idbKey) => {
+        if (idbKey && (!state.settings.claudeApiKey || state.settings.claudeApiKey !== idbKey)) {
+            console.log('[IDB] Refreshed API key from IndexedDB on More screen');
+            state.settings.claudeApiKey = idbKey;
+            saveState();
+            updateApiKeyStatus();
+        }
+    }).catch(() => {});
 };
 
 /* ============================================================
@@ -12801,8 +12997,15 @@ async function hydrateApiKeyFromIDB() {
     }
 }
 
-// Run hydration on startup
+// Run hydration on startup - both immediately and after DOM ready
+// to handle different timing scenarios
 hydrateApiKeyFromIDB();
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        // Re-run hydration after DOM is ready to update UI
+        setTimeout(hydrateApiKeyFromIDB, 100);
+    });
+}
 
 /* ============================================================
    ===== PRD ADDITIONS - Upgrade #5: PWA ======================
