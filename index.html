@@ -8260,7 +8260,7 @@
             <div class="type-options" id="typeOptions">
                 <button class="type-btn" data-type="hiit">
                     <span class="type-btn-icon-lux" id="typeBtnIconHiit"></span>
-                    <span>HIIT</span>
+                    <span>מתיחות</span>
                 </button>
                 <button class="type-btn" data-type="endurance">
                     <span class="type-btn-icon-lux" id="typeBtnIconEndurance"></span>
@@ -8268,11 +8268,11 @@
                 </button>
                 <button class="type-btn" data-type="skills">
                     <span class="type-btn-icon-lux" id="typeBtnIconSkills"></span>
-                    <span>טכניקה</span>
+                    <span>אימון משקולות</span>
                 </button>
                 <button class="type-btn" data-type="warmup">
                     <span class="type-btn-icon-lux" id="typeBtnIconWarmup"></span>
-                    <span>חימום</span>
+                    <span>הליכה</span>
                 </button>
             </div>
         </div>
@@ -10494,10 +10494,10 @@ const MOVEMENT_LEVELS = [
 ];
 
 const WORKOUT_TYPES = {
-    'hiit':      { iconKey: 'spark', name: 'HIIT' },
+    'hiit':      { iconKey: 'spark', name: 'מתיחות' },
     'endurance': { iconKey: 'muscle', name: 'סיבולת' },
-    'skills':    { iconKey: 'skill', name: 'טכניקה' },
-    'warmup':    { iconKey: 'sapling', name: 'חימום' }
+    'skills':    { iconKey: 'skill', name: 'אימון משקולות' },
+    'warmup':    { iconKey: 'sapling', name: 'הליכה' }
 };
 
 const MOOD_EMOJI = { great: '😊', ok: '😐', tough: '😓' };
@@ -12137,6 +12137,9 @@ function saveApiKey() {
     state.settings.claudeApiKey = key;
     saveState();
     updateApiKeyStatus();
+    // Re-request persistent storage when user actively saves a key
+    // (browsers are more likely to grant it after meaningful user interaction)
+    if (key) requestPersistentStorage();
 }
 
 function updateApiKeyStatus() {
@@ -12682,11 +12685,32 @@ document.addEventListener('keydown', (e) => {
 // Run once on initial load (after state is loaded and DOM ready)
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initAnchorIfNeeded, 600);
+    // Request persistent storage to prevent browser from clearing localStorage
+    requestPersistentStorage();
 });
 // Fallback: also try after window load
 window.addEventListener('load', () => {
     setTimeout(initAnchorIfNeeded, 800);
 });
+
+/* ============================================================
+   ===== Persistent Storage - prevent localStorage eviction ===
+   ============================================================ */
+async function requestPersistentStorage() {
+    try {
+        if (navigator.storage && navigator.storage.persist) {
+            const isPersisted = await navigator.storage.persisted();
+            if (!isPersisted) {
+                const granted = await navigator.storage.persist();
+                console.log('[Storage] Persistent storage granted:', granted);
+            } else {
+                console.log('[Storage] Storage already persistent');
+            }
+        }
+    } catch (e) {
+        console.warn('[Storage] Persistent storage request failed:', e);
+    }
+}
 
 /* ============================================================
    ===== PRD ADDITIONS - Upgrade #5: PWA ======================
